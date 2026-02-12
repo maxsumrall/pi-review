@@ -11,6 +11,15 @@
     "review"
   ],
   "license": "MIT",
+  "author": "Max Sumrall",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/maxsumrall/pi-review.git"
+  },
+  "bugs": {
+    "url": "https://github.com/maxsumrall/pi-review/issues"
+  },
+  "homepage": "https://github.com/maxsumrall/pi-review#readme",
   "files": [
     "index.ts",
     "prompts/",

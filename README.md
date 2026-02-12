@@ -77,13 +77,13 @@ pi install npm:pi-review@0.1.0
 ### From git
 
 ```bash
-pi install https://github.com/<you>/pi-review
+pi install https://github.com/maxsumrall/pi-review
 ```
 
 Or project-local (shared via `.pi/settings.json`):
 
 ```bash
-pi install -l https://github.com/<you>/pi-review
+pi install -l https://github.com/maxsumrall/pi-review
 ```
 
 ### Local dev
