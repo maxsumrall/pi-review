@@ -43,6 +43,20 @@ Pin a specific version:
 pi install npm:pi-review@0.1.0
 ```
 
+## Releasing new versions (maintainers)
+
+This repo includes a GitHub Action that publishes to npm **only when you trigger it**.
+
+1) Add an npm automation token as repo secret `NPM_TOKEN`
+2) In GitHub: Actions → **Release (npm)** → Run workflow
+   - choose `patch`, `minor`, `major`, or an explicit `x.y.z`
+
+The workflow will:
+- bump `package.json` version
+- create a git tag
+- push tag + commit
+- `npm publish`
+
 ### From git
 
 ```bash
