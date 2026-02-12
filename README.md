@@ -35,7 +35,7 @@ In pi:
 - `/review` → opens an interactive picker
 - `/review staged` → staged-only
 - `/review worktree` → working tree
-- `/review 123` or `/review #123` → PR 123 (uses `gh`)
+- `/review 123` or `/review #123` → PR 123 (uses `gh`; must be run inside the repo that owns the PR, with `gh` authenticated)
 - `/review recent` or `/review recent 100` → pick base commit from last N commits
 
 ## Prompt templates (tweak the stages)
