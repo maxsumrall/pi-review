@@ -487,10 +487,29 @@ export default function (pi: ExtensionAPI) {
 		sendCurrentStagePrompt(ctx);
 	});
 
+	pi.on("input", async (event, ctx) => {
+		if (!ctx.hasUI) return { action: "continue" as const };
+
+		// Let users interrupt the suite by typing anything.
+		if (suiteActive && event.source === "interactive") {
+			endSuite(ctx, "user interrupted");
+			return { action: "continue" as const };
+		}
+
+		return { action: "continue" as const };
+	});
+
+	function parseSuiteFlag(argsRaw: string): { suite: boolean; rest: string } {
+		const args = String(argsRaw || "").trim();
+		const m = args.match(/^(suite|multi)(?:\s+(.*))?$/i);
+		if (!m) return { suite: false, rest: args };
+		return { suite: true, rest: String(m[2] || "").trim() };
+	}
+
 	// --- Commands ---
 	pi.registerCommand("review", {
 		description:
-			"Interactive review picker (working tree / staged / PR / recent commits), then produce a high-signal review report",
+			"Interactive review picker (working tree / staged / PR / recent commits). Use 'suite' to run multi-stage reviews.",
 		handler: async (args, ctx) => {
 			if (!ctx.isIdle()) {
 				ctx.ui.notify("Agent is busy; try again when idle", "warning");
@@ -499,31 +518,30 @@ export default function (pi: ExtensionAPI) {
 
 			if (!(await ensureGitRepo(pi, ctx, "review"))) return;
 
-			const target = await resolveTarget(pi, ctx, args);
+			const parsed = parseSuiteFlag(args);
+			let runSuite = parsed.suite;
+
+			if (!runSuite && ctx.hasUI && !String(args || "").trim()) {
+				const choice = await ctx.ui.select("Review mode", [
+					"Single pass (one high-signal review)",
+					"Multi-stage suite (Overall → Linus → Staff → Synthesis)",
+				]);
+				if (!choice) return;
+				runSuite = choice.startsWith("Multi-stage");
+			}
+
+			const target = await resolveTarget(pi, ctx, parsed.rest);
 			if (!target) return;
 
-			pi.sendUserMessage(buildSinglePrompt(target));
-		},
-	});
-
-	pi.registerCommand("review-suite", {
-		description:
-			"Run a multi-stage review: overall → Linus → Staff → synthesis. Stages are customizable via prompt templates.",
-		handler: async (args, ctx) => {
-			if (!ctx.isIdle()) {
-				ctx.ui.notify("Agent is busy; try again when idle", "warning");
+			if (!runSuite) {
+				pi.sendUserMessage(buildSinglePrompt(target));
 				return;
 			}
 
 			if (suiteActive) {
-				ctx.ui.notify("Review suite already running. Use /review-suite-cancel to stop.", "warning");
+				ctx.ui.notify("A review suite is already running. Type anything to interrupt it.", "warning");
 				return;
 			}
-
-			if (!(await ensureGitRepo(pi, ctx, "review-suite"))) return;
-
-			const target = await resolveTarget(pi, ctx, args);
-			if (!target) return;
 
 			suiteActive = true;
 			suiteTarget = target;
@@ -535,32 +553,6 @@ export default function (pi: ExtensionAPI) {
 
 			ctx.ui.notify("Review suite started", "info");
 			sendCurrentStagePrompt(ctx);
-		},
-	});
-
-	pi.registerCommand("review-suite-status", {
-		description: "Show review suite status",
-		handler: async (_args, ctx) => {
-			if (!suiteActive) {
-				ctx.ui.notify("Review suite: inactive", "info");
-				return;
-			}
-			const stage = currentStage();
-			ctx.ui.notify(
-				`Review suite: running (${suiteStageIndex + 1}/${DEFAULT_SUITE_STAGES.length}) stage=${stage?.label ?? "?"}`,
-				"info",
-			);
-		},
-	});
-
-	pi.registerCommand("review-suite-cancel", {
-		description: "Cancel a running review suite",
-		handler: async (_args, ctx) => {
-			if (!suiteActive) {
-				ctx.ui.notify("Review suite is not running", "info");
-				return;
-			}
-			endSuite(ctx, "cancelled by user");
 		},
 	});
 }

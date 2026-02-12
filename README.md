@@ -19,9 +19,9 @@ Interactive picker to choose what to review:
 
 Then it injects a structured review prompt into the chat.
 
-### `/review-suite`
+### Multi-stage suite (still via `/review`)
 
-Runs a multi-stage review pipeline and then synthesizes the results:
+`/review suite` (or choosing it in the UI) runs a multi-stage review pipeline and then synthesizes the results:
 
 1) Overall review
 2) Linus-style blunt review
@@ -40,9 +40,7 @@ In pi:
 - `/review 123` or `/review #123` → PR 123 (uses `gh`)
 - `/review recent` or `/review recent 100` → pick base commit from last N commits
 
-- `/review-suite` → runs the multi-stage suite (same picker)
-- `/review-suite-status` → show suite status
-- `/review-suite-cancel` → cancel a running suite
+- `/review suite` → runs the multi-stage suite (same picker)
 
 ## Prompt templates (tweak the stages)
 
