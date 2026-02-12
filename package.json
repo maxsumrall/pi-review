@@ -1,10 +1,22 @@
 {
   "name": "pi-review",
   "version": "0.1.0",
-  "private": true,
   "description": "pi extension that adds an interactive /review command (worktree/staged/PR/recent commits)",
-  "keywords": ["pi-package"],
+  "keywords": [
+    "pi-package",
+    "pi",
+    "pi-coding-agent",
+    "extension",
+    "code-review",
+    "review"
+  ],
   "license": "MIT",
+  "files": [
+    "extensions/",
+    "README.md",
+    "LICENSE",
+    "package.json"
+  ],
   "pi": {
     "extensions": ["./extensions"]
   },

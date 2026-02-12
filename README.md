@@ -25,7 +25,25 @@ In pi:
 
 ## Install
 
-### From git (recommended)
+### From npm (recommended)
+
+```bash
+pi install npm:pi-review
+```
+
+Update to latest (if you installed without a version pin):
+
+```bash
+pi update
+```
+
+Pin a specific version:
+
+```bash
+pi install npm:pi-review@0.1.0
+```
+
+### From git
 
 ```bash
 pi install https://github.com/<you>/pi-review
