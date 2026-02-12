@@ -10,18 +10,14 @@ A pi extension that adds interactive review commands for generating high-signal 
 
 ### `/review`
 
-Interactive picker to choose what to review:
+Interactive picker to choose what to review, then runs a multi-stage review suite:
 
 - Working tree (staged + unstaged + untracked)
 - Staged changes only
 - GitHub PR by number
 - Recent commits (pick a base commit)
 
-Then it injects a structured review prompt into the chat.
-
-### Multi-stage suite (still via `/review`)
-
-`/review suite` (or choosing it in the UI) runs a multi-stage review pipeline and then synthesizes the results:
+It runs these stages and then synthesizes the results:
 
 1) Overall review
 2) Linus-style blunt review
@@ -29,6 +25,8 @@ Then it injects a structured review prompt into the chat.
 4) Final synthesis report (deduplicated + prioritized)
 
 Stages are designed to be tweakable via prompt templates.
+
+To interrupt/cancel mid-run, just type anything.
 
 ## Usage
 
@@ -39,8 +37,6 @@ In pi:
 - `/review worktree` → working tree
 - `/review 123` or `/review #123` → PR 123 (uses `gh`)
 - `/review recent` or `/review recent 100` → pick base commit from last N commits
-
-- `/review suite` → runs the multi-stage suite (same picker)
 
 ## Prompt templates (tweak the stages)
 

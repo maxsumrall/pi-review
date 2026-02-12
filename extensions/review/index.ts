@@ -499,17 +499,10 @@ export default function (pi: ExtensionAPI) {
 		return { action: "continue" as const };
 	});
 
-	function parseSuiteFlag(argsRaw: string): { suite: boolean; rest: string } {
-		const args = String(argsRaw || "").trim();
-		const m = args.match(/^(suite|multi)(?:\s+(.*))?$/i);
-		if (!m) return { suite: false, rest: args };
-		return { suite: true, rest: String(m[2] || "").trim() };
-	}
-
 	// --- Commands ---
 	pi.registerCommand("review", {
 		description:
-			"Interactive review picker (working tree / staged / PR / recent commits). Use 'suite' to run multi-stage reviews.",
+			"Interactive review picker (working tree / staged / PR / recent commits), then run a multi-stage review (overall → linus → staff → synthesis).",
 		handler: async (args, ctx) => {
 			if (!ctx.isIdle()) {
 				ctx.ui.notify("Agent is busy; try again when idle", "warning");
@@ -518,25 +511,13 @@ export default function (pi: ExtensionAPI) {
 
 			if (!(await ensureGitRepo(pi, ctx, "review"))) return;
 
-			const parsed = parseSuiteFlag(args);
-			let runSuite = parsed.suite;
+			// Backwards compatible: allow old "/review suite ..." usage, but ignore the word.
+			const cleanedArgs = String(args || "")
+				.trim()
+				.replace(/^(suite|multi)\b\s*/i, "");
 
-			if (!runSuite && ctx.hasUI && !String(args || "").trim()) {
-				const choice = await ctx.ui.select("Review mode", [
-					"Single pass (one high-signal review)",
-					"Multi-stage suite (Overall → Linus → Staff → Synthesis)",
-				]);
-				if (!choice) return;
-				runSuite = choice.startsWith("Multi-stage");
-			}
-
-			const target = await resolveTarget(pi, ctx, parsed.rest);
+			const target = await resolveTarget(pi, ctx, cleanedArgs);
 			if (!target) return;
-
-			if (!runSuite) {
-				pi.sendUserMessage(buildSinglePrompt(target));
-				return;
-			}
 
 			if (suiteActive) {
 				ctx.ui.notify("A review suite is already running. Type anything to interrupt it.", "warning");
@@ -551,7 +532,7 @@ export default function (pi: ExtensionAPI) {
 			suiteBoundaryCount = -1;
 			boundaryNeedsCapture = true;
 
-			ctx.ui.notify("Review suite started", "info");
+			ctx.ui.notify("Review started", "info");
 			sendCurrentStagePrompt(ctx);
 		},
 	});
