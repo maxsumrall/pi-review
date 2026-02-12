@@ -1,10 +1,12 @@
 # pi-review
 
-A pi extension that adds an interactive `/review` command for generating a high-signal code review prompt.
+A pi extension that adds interactive review commands for generating high-signal code review prompts.
 
 ## What it does
 
-`/review` lets you pick what to review:
+### `/review`
+
+Interactive picker to choose what to review:
 
 - Working tree (staged + unstaged + untracked)
 - Staged changes only
@@ -12,6 +14,17 @@ A pi extension that adds an interactive `/review` command for generating a high-
 - Recent commits (pick a base commit)
 
 Then it injects a structured review prompt into the chat.
+
+### `/review-suite`
+
+Runs a multi-stage review pipeline and then synthesizes the results:
+
+1) Overall review
+2) Linus-style blunt review
+3) Staff engineer (FAANG) risk-focused review
+4) Final synthesis report (deduplicated + prioritized)
+
+Stages are designed to be tweakable via prompt templates.
 
 ## Usage
 
@@ -22,6 +35,26 @@ In pi:
 - `/review worktree` → working tree
 - `/review 123` or `/review #123` → PR 123 (uses `gh`)
 - `/review recent` or `/review recent 100` → pick base commit from last N commits
+
+- `/review-suite` → runs the multi-stage suite (same picker)
+- `/review-suite-status` → show suite status
+- `/review-suite-cancel` → cancel a running suite
+
+## Prompt templates (tweak the stages)
+
+This package ships prompt templates in `prompts/` and also exposes them to pi.
+
+The review suite loads prompts in this order:
+
+1) `~/.pi/agent/prompts/<name>.md` (user override)
+2) the package default in `prompts/<name>.md`
+
+So to customize a stage, copy and edit one of these:
+
+- `review-overall.md`
+- `review-linus.md`
+- `review-staff.md`
+- `review-synthesize.md`
 
 ## Install
 
@@ -42,20 +75,6 @@ Pin a specific version:
 ```bash
 pi install npm:pi-review@0.1.0
 ```
-
-## Releasing new versions (maintainers)
-
-This repo includes a GitHub Action that publishes to npm **only when you trigger it**.
-
-1) Add an npm automation token as repo secret `NPM_TOKEN`
-2) In GitHub: Actions → **Release (npm)** → Run workflow
-   - choose `patch`, `minor`, `major`, or an explicit `x.y.z`
-
-The workflow will:
-- bump `package.json` version
-- create a git tag
-- push tag + commit
-- `npm publish`
 
 ### From git
 
@@ -78,6 +97,20 @@ pi install .
 # or for one-off testing
 pi -e .
 ```
+
+## Releasing new versions (maintainers)
+
+This repo includes a GitHub Action that publishes to npm **only when you trigger it**.
+
+1) Add an npm automation token as repo secret `NPM_TOKEN`
+2) In GitHub: Actions → **Release (npm)** → Run workflow
+   - choose `patch`, `minor`, `major`, or an explicit `x.y.z`
+
+The workflow will:
+- bump `package.json` version
+- create a git tag
+- push tag + commit
+- `npm publish`
 
 ## Notes
 

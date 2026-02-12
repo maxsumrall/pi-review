@@ -13,12 +13,14 @@
   "license": "MIT",
   "files": [
     "extensions/",
+    "prompts/",
     "README.md",
     "LICENSE",
     "package.json"
   ],
   "pi": {
-    "extensions": ["./extensions"]
+    "extensions": ["./extensions"],
+    "prompts": ["./prompts"]
   },
   "peerDependencies": {
     "@mariozechner/pi-coding-agent": "*",

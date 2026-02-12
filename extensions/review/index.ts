@@ -1,6 +1,9 @@
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { DynamicBorder } from "@mariozechner/pi-coding-agent";
 import { Container, type SelectItem, SelectList, Text } from "@mariozechner/pi-tui";
+import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 
 type ReviewTarget =
 	| { kind: "worktree" }
@@ -9,6 +12,19 @@ type ReviewTarget =
 	| { kind: "recent"; baseSha: string };
 
 type ParsedTarget = ReviewTarget | { kind: "recentPicker"; limit: number };
+
+type ReviewSuiteStage =
+	| { kind: "review"; id: string; promptName: string; label: string }
+	| { kind: "synthesize"; id: string; promptName: string; label: string };
+
+const STAGE_DONE_MARKER = "[[PI_REVIEW_STAGE_DONE]]";
+
+const DEFAULT_SUITE_STAGES: ReviewSuiteStage[] = [
+	{ kind: "review", id: "overall", promptName: "review-overall", label: "Overall" },
+	{ kind: "review", id: "linus", promptName: "review-linus", label: "Linus" },
+	{ kind: "review", id: "staff", promptName: "review-staff", label: "Staff" },
+	{ kind: "synthesize", id: "synthesize", promptName: "review-synthesize", label: "Synthesis" },
+];
 
 function clampInt(value: number, min: number, max: number): number {
 	return Math.max(min, Math.min(max, value));
@@ -37,19 +53,106 @@ function parseArgs(argsRaw: string): ParsedTarget | null {
 	return null;
 }
 
-function buildPrompt(target: ReviewTarget): string {
+function stripFrontmatter(content: string): string {
+	const match = content.match(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n)?([\s\S]*)$/);
+	return match ? match[1].trim() : content.trim();
+}
+
+function renderVars(template: string, vars: Record<string, string>): string {
+	let out = template;
+	for (const [k, v] of Object.entries(vars)) {
+		out = out.replaceAll(`{{${k}}}`, v);
+	}
+	return out;
+}
+
+function loadPromptText(promptName: string): string {
+	// Allow user override in ~/.pi/agent/prompts/<name>.md for easy tweaking
+	const userPath = join(homedir(), ".pi", "agent", "prompts", `${promptName}.md`);
+	if (existsSync(userPath)) {
+		return stripFrontmatter(readFileSync(userPath, "utf-8"));
+	}
+
+	// Fallback: load from this package's prompts/
+	// extensions/review/index.ts -> ../../prompts
+	const pkgPath = join(__dirname, "..", "..", "prompts", `${promptName}.md`);
+	if (existsSync(pkgPath)) {
+		return stripFrontmatter(readFileSync(pkgPath, "utf-8"));
+	}
+
+	return "";
+}
+
+function buildScopePrompt(target: ReviewTarget): string {
 	const common =
 		`You are doing a high-signal code review.\n\n` +
-		`Hard rules for this run:\n` +
-		`- Do NOT implement changes. Do NOT edit files. Review only.\n` +
-		`- If you spot an issue, propose a fix in prose or small patch snippets, but don't apply it.\n\n` +
 		`Review priorities (in order):\n` +
 		`1) Correctness / logic errors\n` +
 		`2) Security / auth / secrets\n` +
 		`3) Error handling & observability (logs/metrics)\n` +
 		`4) Data correctness (schemas/migrations/serialization)\n` +
 		`5) Performance / concurrency / idempotency\n` +
-		`6) Tests (missing/weak tests)\n\n` +
+		`6) Tests (missing/weak tests)\n\n`;
+
+	switch (target.kind) {
+		case "worktree":
+			return (
+				common +
+				`Review my local working tree changes (staged + unstaged + untracked).\n\n` +
+				`Process:\n` +
+				`1) Establish scope:\n` +
+				`   - git status --porcelain=v1\n` +
+				`   - git diff --name-only\n` +
+				`   - git diff --cached --name-only\n` +
+				`   - git ls-files --others --exclude-standard\n` +
+				`2) For each changed file, inspect patches:\n` +
+				`   - git diff --patch -- <path>\n` +
+				`   - git diff --cached --patch -- <path>\n` +
+				`3) For untracked files, open and read content directly.\n`
+			);
+		case "staged":
+			return (
+				common +
+				`Review my staged changes only.\n\n` +
+				`Process:\n` +
+				`1) Establish scope:\n` +
+				`   - git status --porcelain=v1\n` +
+				`   - git diff --cached --name-only\n` +
+				`2) Inspect each staged file:\n` +
+				`   - git diff --cached --patch -- <path>\n`
+			);
+		case "pr":
+			return (
+				common +
+				`Review GitHub PR #${target.prNumber} in this repo.\n\n` +
+				`Process (use gh CLI):\n` +
+				`1) gh pr view ${target.prNumber} --json title,body,author,baseRefName,headRefName\n` +
+				`2) gh pr diff ${target.prNumber}\n` +
+				`If gh is unavailable or errors, say exactly what to run / paste instead.\n`
+			);
+		case "recent":
+			return (
+				common +
+				`Review the commits from base commit ${target.baseSha} (inclusive) to HEAD.\n\n` +
+				`Process:\n` +
+				`1) Inspect the base commit itself:\n` +
+				`   - git show ${target.baseSha}\n` +
+				`2) Try to review the full range (inclusive):\n` +
+				`   - git log --oneline --decorate ${target.baseSha}^..HEAD\n` +
+				`   - git diff ${target.baseSha}^..HEAD\n` +
+				`   If \`${target.baseSha}^\` fails (root commit), do:\n` +
+				`   - git log --oneline --decorate ${target.baseSha}..HEAD\n` +
+				`   - git diff ${target.baseSha}..HEAD\n`
+			);
+	}
+}
+
+function buildSinglePrompt(target: ReviewTarget): string {
+	// Backwards-compatible /review behavior.
+	const common =
+		`Hard rules for this run:\n` +
+		`- Do NOT implement changes. Do NOT edit files. Review only.\n` +
+		`- If you spot an issue, propose a fix in prose or small patch snippets, but don't apply it.\n\n` +
 		`Additional instructions:\n` +
 		`- Pretend you are Linus Torvalds doing a kernel patch review: be terse, blunt, and ruthlessly high-signal.\n` +
 		`- Simultaneously apply a FAANG Staff Engineer lens (a week before performance review, on their A-game for a promotion).\n` +
@@ -72,57 +175,7 @@ function buildPrompt(target: ReviewTarget): string {
 		`### Tests (what's missing + targeted suggestions)\n` +
 		`### Suggested next commands\n\n`;
 
-	switch (target.kind) {
-		case "worktree":
-			return (
-				`Review my local working tree changes (staged + unstaged + untracked).\n\n` +
-				common +
-				`Process:\n` +
-				`1) Establish scope:\n` +
-				`   - git status --porcelain=v1\n` +
-				`   - git diff --name-only\n` +
-				`   - git diff --cached --name-only\n` +
-				`   - git ls-files --others --exclude-standard\n` +
-				`2) For each changed file, inspect patches:\n` +
-				`   - git diff --patch -- <path>\n` +
-				`   - git diff --cached --patch -- <path>\n` +
-				`3) For untracked files, open and read content directly.\n`
-			);
-		case "staged":
-			return (
-				`Review my staged changes only.\n\n` +
-				common +
-				`Process:\n` +
-				`1) Establish scope:\n` +
-				`   - git status --porcelain=v1\n` +
-				`   - git diff --cached --name-only\n` +
-				`2) Inspect each staged file:\n` +
-				`   - git diff --cached --patch -- <path>\n`
-			);
-		case "pr":
-			return (
-				`Review GitHub PR #${target.prNumber} in this repo.\n\n` +
-				common +
-				`Process (use gh CLI):\n` +
-				`1) gh pr view ${target.prNumber} --json title,body,author,baseRefName,headRefName\n` +
-				`2) gh pr diff ${target.prNumber}\n` +
-				`If gh is unavailable or errors, tell me exactly what to run / paste instead.\n`
-			);
-		case "recent":
-			return (
-				`Review the commits from base commit ${target.baseSha} (inclusive) to HEAD.\n\n` +
-				common +
-				`Process:\n` +
-				`1) Inspect the base commit itself:\n` +
-				`   - git show ${target.baseSha}\n` +
-				`2) Try to review the full range (inclusive):\n` +
-				`   - git log --oneline --decorate ${target.baseSha}^..HEAD\n` +
-				`   - git diff ${target.baseSha}^..HEAD\n` +
-				`   If \`${target.baseSha}^\` fails (root commit), do:\n` +
-				`   - git log --oneline --decorate ${target.baseSha}..HEAD\n` +
-				`   - git diff ${target.baseSha}..HEAD\n`
-			);
-	}
+	return `${buildScopePrompt(target)}\n\n${common}`;
 }
 
 async function pickBaseCommit(pi: ExtensionAPI, ctx: any, limit: number): Promise<string | null> {
@@ -193,7 +246,248 @@ async function pickBaseCommit(pi: ExtensionAPI, ctx: any, limit: number): Promis
 	);
 }
 
+async function ensureGitRepo(pi: ExtensionAPI, ctx: any, commandName: string): Promise<boolean> {
+	const res = await pi.exec("git", ["rev-parse", "--is-inside-work-tree"], { timeout: 5_000 });
+	if (res.code !== 0) {
+		ctx.ui.notify(`/${commandName}: not inside a git repository`, "error");
+		return false;
+	}
+	return true;
+}
+
+async function resolveTarget(pi: ExtensionAPI, ctx: any, args: string): Promise<ReviewTarget | null> {
+	const parsed = parseArgs(args);
+	let target: ReviewTarget | null = null;
+
+	if (parsed) {
+		if (parsed.kind === "recentPicker") {
+			if (!ctx.hasUI) {
+				// Non-interactive mode fallback.
+				return { kind: "worktree" };
+			}
+
+			const sha = await pickBaseCommit(pi, ctx, parsed.limit);
+			if (!sha) return null;
+			target = { kind: "recent", baseSha: sha };
+		} else {
+			target = parsed;
+		}
+	}
+
+	if (target) return target;
+
+	if (!ctx.hasUI) return { kind: "worktree" };
+
+	while (!target) {
+		const choice = await ctx.ui.select("What do you want to review?", [
+			"Working tree (staged + unstaged + untracked)",
+			"Staged changes only",
+			"GitHub PR by number",
+			"Recent commits (pick base commit)",
+		]);
+
+		if (!choice) return null; // cancelled
+
+		if (choice.startsWith("Working tree")) target = { kind: "worktree" };
+		else if (choice.startsWith("Staged")) target = { kind: "staged" };
+		else if (choice.startsWith("Recent")) {
+			const sha = await pickBaseCommit(pi, ctx, 50);
+			if (!sha) continue;
+			target = { kind: "recent", baseSha: sha };
+		} else {
+			const input = await ctx.ui.input("PR number", "e.g. 123");
+			if (!input) continue;
+			const prNumber = Number(String(input).trim().replace(/^#/, ""));
+			if (!Number.isFinite(prNumber) || prNumber <= 0) {
+				ctx.ui.notify("Invalid PR number", "error");
+				continue;
+			}
+			target = { kind: "pr", prNumber };
+		}
+	}
+
+	return target;
+}
+
+function getLastAssistantText(messages: any[]): string {
+	const assistantMessages = messages.filter((m) => m.role === "assistant");
+	const last = assistantMessages[assistantMessages.length - 1];
+	if (!last) return "";
+	const parts = Array.isArray(last.content) ? last.content : [];
+	const text = parts
+		.filter((p: any) => p?.type === "text" && typeof p.text === "string")
+		.map((p: any) => p.text)
+		.join("\n")
+		.trim();
+	return text;
+}
+
 export default function (pi: ExtensionAPI) {
+	// --- Review suite state (multi-stage) ---
+	let suiteActive = false;
+	let suiteTarget: ReviewTarget | null = null;
+	let suiteStageIndex = 0;
+	let suiteReports: Array<{ stageId: string; stageLabel: string; text: string }> = [];
+	let suiteFreshContext = true;
+	let suiteBoundaryCount = -1;
+	let boundaryNeedsCapture = false;
+
+	function currentStage(): ReviewSuiteStage | null {
+		return DEFAULT_SUITE_STAGES[suiteStageIndex] ?? null;
+	}
+
+	function updateSuiteStatus(ctx: ExtensionContext) {
+		if (!suiteActive) {
+			ctx.ui.setStatus("pi-review", undefined);
+			return;
+		}
+
+		const stage = currentStage();
+		const label = stage ? stage.label : "?";
+		const progress = `${suiteStageIndex + 1}/${DEFAULT_SUITE_STAGES.length}`;
+		const fresh = suiteFreshContext ? " | fresh" : "";
+		ctx.ui.setStatus("pi-review", `Review suite: ${label} (${progress})${fresh}`);
+	}
+
+	function endSuite(ctx: ExtensionContext, reason: string) {
+		suiteActive = false;
+		suiteTarget = null;
+		suiteStageIndex = 0;
+		suiteReports = [];
+		suiteBoundaryCount = -1;
+		boundaryNeedsCapture = false;
+		updateSuiteStatus(ctx);
+		ctx.ui.notify(`Review suite ended: ${reason}`, "info");
+	}
+
+	function buildStagePrompt(target: ReviewTarget, stage: ReviewSuiteStage): string {
+		if (stage.kind === "synthesize") {
+			const reportsText = suiteReports
+				.map(
+					(r) =>
+						`## ${r.stageLabel}\n\n` +
+						"```\n" +
+						r.text.trim() +
+						"\n```\n",
+				)
+				.join("\n");
+
+			const tmpl = loadPromptText(stage.promptName);
+			return renderVars(tmpl, { REPORTS: reportsText });
+		}
+
+		const scope = buildScopePrompt(target).trim();
+		const tmpl = loadPromptText(stage.promptName);
+		return renderVars(tmpl, { SCOPE: scope });
+	}
+
+	function sendCurrentStagePrompt(ctx: ExtensionContext) {
+		if (!suiteTarget) {
+			endSuite(ctx, "internal error: missing target");
+			return;
+		}
+
+		const stage = currentStage();
+		if (!stage) {
+			endSuite(ctx, "done");
+			return;
+		}
+
+		const prompt = buildStagePrompt(suiteTarget, stage);
+		if (!prompt.trim()) {
+			endSuite(ctx, `missing prompt template: ${stage.promptName}`);
+			return;
+		}
+
+		updateSuiteStatus(ctx);
+		pi.sendUserMessage(prompt);
+	}
+
+	// Strip prior stage outputs from context for stages 2..N (except synthesis)
+	pi.on("context", async (event) => {
+		if (!suiteActive || !suiteFreshContext) return;
+
+		const stage = currentStage();
+		if (!stage || stage.kind !== "review") return;
+		if (suiteStageIndex === 0) return;
+
+		const messages = event.messages;
+		if (!Array.isArray(messages) || messages.length === 0) return;
+
+		if (boundaryNeedsCapture) {
+			for (let i = messages.length - 1; i >= 0; i--) {
+				if (messages[i].role === "user") {
+					suiteBoundaryCount = i;
+					break;
+				}
+			}
+			boundaryNeedsCapture = false;
+		}
+
+		if (suiteBoundaryCount < 0) return;
+
+		let lastUserIdx = -1;
+		for (let i = messages.length - 1; i >= 0; i--) {
+			if (messages[i].role === "user") {
+				lastUserIdx = i;
+				break;
+			}
+		}
+		if (lastUserIdx < 0) return;
+		if (suiteBoundaryCount >= lastUserIdx) return;
+
+		const preSuite = messages.slice(0, suiteBoundaryCount);
+		const currentIterationMsgs = messages.slice(lastUserIdx);
+
+		const assembled: typeof messages = [...preSuite];
+		assembled.push({
+			role: "user",
+			content: [
+				{
+					type: "text",
+					text:
+						`[Review suite stage ${stage.label}. Prior stage outputs are intentionally hidden. Review with fresh eyes.]`,
+				},
+			],
+			timestamp: Date.now(),
+		} as any);
+		assembled.push(...currentIterationMsgs);
+
+		return { messages: assembled };
+	});
+
+	pi.on("agent_end", async (event, ctx) => {
+		if (!suiteActive) return;
+
+		const stage = currentStage();
+		if (!stage) {
+			endSuite(ctx, "done");
+			return;
+		}
+
+		const text = getLastAssistantText(event.messages || []);
+		if (!text) {
+			endSuite(ctx, "aborted (no assistant output) ");
+			return;
+		}
+
+		if (stage.kind === "review") {
+			const cleaned = text.replaceAll(STAGE_DONE_MARKER, "").trim();
+			suiteReports.push({ stageId: stage.id, stageLabel: stage.label, text: cleaned });
+		}
+
+		// Advance
+		suiteStageIndex += 1;
+
+		if (suiteStageIndex >= DEFAULT_SUITE_STAGES.length) {
+			endSuite(ctx, "complete");
+			return;
+		}
+
+		sendCurrentStagePrompt(ctx);
+	});
+
+	// --- Commands ---
 	pi.registerCommand("review", {
 		description:
 			"Interactive review picker (working tree / staged / PR / recent commits), then produce a high-signal review report",
@@ -203,74 +497,70 @@ export default function (pi: ExtensionAPI) {
 				return;
 			}
 
-			// Ensure we're in a git repo.
-			try {
-				await pi.exec("git", ["rev-parse", "--is-inside-work-tree"], { timeout: 5_000 });
-			} catch {
-				ctx.ui.notify("/review: not inside a git repository", "error");
+			if (!(await ensureGitRepo(pi, ctx, "review"))) return;
+
+			const target = await resolveTarget(pi, ctx, args);
+			if (!target) return;
+
+			pi.sendUserMessage(buildSinglePrompt(target));
+		},
+	});
+
+	pi.registerCommand("review-suite", {
+		description:
+			"Run a multi-stage review: overall → Linus → Staff → synthesis. Stages are customizable via prompt templates.",
+		handler: async (args, ctx) => {
+			if (!ctx.isIdle()) {
+				ctx.ui.notify("Agent is busy; try again when idle", "warning");
 				return;
 			}
 
-			const parsed = parseArgs(args);
-			let target: ReviewTarget | null = null;
-
-			if (parsed) {
-				if (parsed.kind === "recentPicker") {
-					if (!ctx.hasUI) {
-						pi.sendUserMessage(
-							`Review the most recent ${parsed.limit} commits.\n\n` +
-							`Use:\n` +
-							`- git log --oneline --decorate -n ${parsed.limit}\n` +
-							`- git diff HEAD~${parsed.limit}..HEAD\n\n` +
-							buildPrompt({ kind: "worktree" }).split("\n\n").slice(1).join("\n\n"),
-						);
-						return;
-					}
-
-					const sha = await pickBaseCommit(pi, ctx, parsed.limit);
-					if (!sha) return;
-					target = { kind: "recent", baseSha: sha };
-				} else {
-					target = parsed;
-				}
+			if (suiteActive) {
+				ctx.ui.notify("Review suite already running. Use /review-suite-cancel to stop.", "warning");
+				return;
 			}
 
-			if (!target) {
-				if (!ctx.hasUI) {
-					// Non-interactive mode fallback.
-					target = { kind: "worktree" };
-				} else {
-					while (!target) {
-						const choice = await ctx.ui.select("What do you want to review?", [
-							"Working tree (staged + unstaged + untracked)",
-							"Staged changes only",
-							"GitHub PR by number",
-							"Recent commits (pick base commit)",
-						]);
+			if (!(await ensureGitRepo(pi, ctx, "review-suite"))) return;
 
-						if (!choice) return; // cancelled
+			const target = await resolveTarget(pi, ctx, args);
+			if (!target) return;
 
-						if (choice.startsWith("Working tree")) target = { kind: "worktree" };
-						else if (choice.startsWith("Staged")) target = { kind: "staged" };
-						else if (choice.startsWith("Recent")) {
-							const sha = await pickBaseCommit(pi, ctx, 50);
-							if (!sha) continue; // go back to first page
-							target = { kind: "recent", baseSha: sha };
-						} else {
-							const input = await ctx.ui.input("PR number", "e.g. 123");
-							if (!input) continue;
-							const prNumber = Number(String(input).trim().replace(/^#/, ""));
-							if (!Number.isFinite(prNumber) || prNumber <= 0) {
-								ctx.ui.notify("Invalid PR number", "error");
-								continue;
-							}
-							target = { kind: "pr", prNumber };
-						}
-					}
-				}
+			suiteActive = true;
+			suiteTarget = target;
+			suiteStageIndex = 0;
+			suiteReports = [];
+			suiteFreshContext = true;
+			suiteBoundaryCount = -1;
+			boundaryNeedsCapture = true;
+
+			ctx.ui.notify("Review suite started", "info");
+			sendCurrentStagePrompt(ctx);
+		},
+	});
+
+	pi.registerCommand("review-suite-status", {
+		description: "Show review suite status",
+		handler: async (_args, ctx) => {
+			if (!suiteActive) {
+				ctx.ui.notify("Review suite: inactive", "info");
+				return;
 			}
+			const stage = currentStage();
+			ctx.ui.notify(
+				`Review suite: running (${suiteStageIndex + 1}/${DEFAULT_SUITE_STAGES.length}) stage=${stage?.label ?? "?"}`,
+				"info",
+			);
+		},
+	});
 
-			pi.sendUserMessage(buildPrompt(target));
+	pi.registerCommand("review-suite-cancel", {
+		description: "Cancel a running review suite",
+		handler: async (_args, ctx) => {
+			if (!suiteActive) {
+				ctx.ui.notify("Review suite is not running", "info");
+				return;
+			}
+			endSuite(ctx, "cancelled by user");
 		},
 	});
 }
