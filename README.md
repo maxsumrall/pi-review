@@ -1,3 +1,7 @@
+<p>
+  <img src="assets/banner.png" alt="pi-review banner" width="1100">
+</p>
+
 # pi-review
 
 A pi extension that adds interactive review commands for generating high-signal code review prompts.

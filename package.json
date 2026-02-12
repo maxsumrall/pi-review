@@ -14,6 +14,7 @@
   "files": [
     "extensions/",
     "prompts/",
+    "assets/",
     "README.md",
     "LICENSE",
     "package.json"
