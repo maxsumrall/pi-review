@@ -406,13 +406,11 @@ export default function (pi: ExtensionAPI) {
 	pi.on("context", async (event) => {
 		if (!suiteActive || !suiteFreshContext) return;
 
-		const stage = currentStage();
-		if (!stage || stage.kind !== "review") return;
-		if (suiteStageIndex === 0) return;
-
 		const messages = event.messages;
 		if (!Array.isArray(messages) || messages.length === 0) return;
 
+		// Capture the boundary once: the user message that started stage 1.
+		// This lets us preserve all pre-suite context, while hiding prior stage prompts/outputs.
 		if (boundaryNeedsCapture) {
 			for (let i = messages.length - 1; i >= 0; i--) {
 				if (messages[i].role === "user") {
@@ -423,6 +421,9 @@ export default function (pi: ExtensionAPI) {
 			boundaryNeedsCapture = false;
 		}
 
+		const stage = currentStage();
+		if (!stage || stage.kind !== "review") return;
+		if (suiteStageIndex === 0) return;
 		if (suiteBoundaryCount < 0) return;
 
 		let lastUserIdx = -1;
@@ -444,8 +445,7 @@ export default function (pi: ExtensionAPI) {
 			content: [
 				{
 					type: "text",
-					text:
-						`[Review suite stage ${stage.label}. Prior stage outputs are intentionally hidden. Review with fresh eyes.]`,
+					text: `[Review suite stage ${stage.label}. Prior stage outputs are intentionally hidden. Review with fresh eyes.]`,
 				},
 			],
 			timestamp: Date.now(),
