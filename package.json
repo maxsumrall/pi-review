@@ -12,7 +12,7 @@
   ],
   "license": "MIT",
   "files": [
-    "extensions/",
+    "index.ts",
     "prompts/",
     "assets/",
     "README.md",
@@ -20,7 +20,7 @@
     "package.json"
   ],
   "pi": {
-    "extensions": ["./extensions"],
+    "extensions": ["./index.ts"],
     "prompts": ["./prompts"]
   },
   "peerDependencies": {

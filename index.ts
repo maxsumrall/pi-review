@@ -73,9 +73,8 @@ function loadPromptText(promptName: string): string {
 		return stripFrontmatter(readFileSync(userPath, "utf-8"));
 	}
 
-	// Fallback: load from this package's prompts/
-	// extensions/review/index.ts -> ../../prompts
-	const pkgPath = join(__dirname, "..", "..", "prompts", `${promptName}.md`);
+	// Fallback: load from this package's prompts/ directory
+	const pkgPath = join(__dirname, "prompts", `${promptName}.md`);
 	if (existsSync(pkgPath)) {
 		return stripFrontmatter(readFileSync(pkgPath, "utf-8"));
 	}
@@ -148,7 +147,7 @@ function buildScopePrompt(target: ReviewTarget): string {
 }
 
 function buildSinglePrompt(target: ReviewTarget): string {
-	// Backwards-compatible /review behavior.
+	// Kept for backwards compatibility / reference. The extension always runs the suite.
 	const common =
 		`Hard rules for this run:\n` +
 		`- Do NOT implement changes. Do NOT edit files. Review only.\n` +
