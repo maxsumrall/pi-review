@@ -20,8 +20,7 @@
     "package.json"
   ],
   "pi": {
-    "extensions": ["./index.ts"],
-    "prompts": ["./prompts"]
+    "extensions": ["./index.ts"]
   },
   "peerDependencies": {
     "@mariozechner/pi-coding-agent": "*",

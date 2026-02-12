@@ -40,7 +40,7 @@ In pi:
 
 ## Prompt templates (tweak the stages)
 
-This package ships prompt templates in `prompts/` and also exposes them to pi.
+This package ships its stage prompts in `prompts/` (but they are not exposed as standalone `/...` commands).
 
 The review suite loads prompts in this order:
 
